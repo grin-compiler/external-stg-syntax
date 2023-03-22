@@ -257,7 +257,6 @@ data CbvMark
 
 data IdDetails
   = VanillaId
-  | FExportedId
   | RecSelId
   | DataConWorkId DataConId
   | DataConWrapId DataConId
@@ -323,12 +322,10 @@ data Binder
     }
   deriving (Eq, Ord, Generic, Show)
 
--- TODO: use better names
 data Scope
-  = LocalScope      -- ^ visible for expression body
-  | GlobalScope     -- ^ visible for a single haskell module
-  | HaskellExported -- ^ visible for every haskell module
-  | ForeignExported -- ^ visible for foreign libraries
+  = ModulePublic    -- ^ visible for every haskell module
+  | ModulePrivate   -- ^ visible for a single haskell module
+  | ClosurePrivate  -- ^ visible for expression body
   deriving (Eq, Ord, Generic, Show)
 
 mkTyConUniqueName :: UnitId -> ModuleName -> STyCon -> Name
@@ -344,12 +341,11 @@ mkBinderUniqueName isTopLevel unitId modName SBinder{..}
 
  | otherwise
  = case sbinderScope of
-  LocalScope      -> if isTopLevel || True
+  ModulePublic    -> getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName
+  ModulePrivate   -> getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName <> BS8.pack ('_' : show u)
+  ClosurePrivate  -> if isTopLevel || True
                       then getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName <> BS8.pack ('_' : show u)
                       else sbinderName <> BS8.pack ('_' : show u)
-  GlobalScope     -> getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName <> BS8.pack ('_' : show u)
-  HaskellExported -> getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName
-  ForeignExported -> getUnitId unitId <> "_" <> getModuleName modName <> "." <> sbinderName
   where
     BinderId u = sbinderId
 
@@ -406,8 +402,6 @@ data Expr' idBnd idOcc dcOcc tcOcc
   = StgApp
         idOcc         -- function
         [Arg' idOcc]  -- arguments; may be empty
-        Type          -- result type
-        (Name,Name,Name)  -- fun core type pp, result core type pp, StgApp oigin (Var/Coercion/App)
 
   | StgLit      Lit
 
@@ -533,7 +527,7 @@ data CExportSpec = CExportStatic !SourceText !Name !CCallConv
   deriving (Eq, Ord, Generic, Show)
 
 data StubImpl
-  = StubImplImportCWrapper  !Name !(Maybe Int)
+  = StubImplImportCWrapper  !Name !(Maybe Int) !Bool !Name ![Name]
   | StubImplImportCApi      !Name ![(Maybe Header, BS8.ByteString, Char)]
   deriving (Eq, Ord, Generic, Show)
 
@@ -565,16 +559,6 @@ data ForeignStubs' idOcc
     }
   deriving (Eq, Ord, Generic, Show)
 
-data ForeignSrcLang
-  = LangC      -- ^ C
-  | LangCxx    -- ^ C++
-  | LangObjc   -- ^ Objective C
-  | LangObjcxx -- ^ Objective C++
-  | LangAsm    -- ^ Assembly language (.s)
-  | LangJs     -- ^ JavaScript
-  | RawObject  -- ^ Object (.o)
-  deriving (Eq, Ord, Generic, Show)
-
 -- the whole module
 
 data Module' idBnd idOcc dcOcc tcBnd tcOcc
@@ -589,7 +573,6 @@ data Module' idBnd idOcc dcOcc tcBnd tcOcc
   , moduleExternalTopIds      :: ![(UnitId, [(ModuleName, [idBnd])])]
   , moduleTyCons              :: ![(UnitId, [(ModuleName, [tcBnd])])]
   , moduleTopBindings         :: ![TopBinding' idBnd idOcc dcOcc tcOcc]
-  , moduleForeignFiles        :: ![(ForeignSrcLang, FilePath)]
   }
   deriving (Eq, Ord, Generic, Show)
 
@@ -644,7 +627,6 @@ instance Binary StgOp
 instance Binary DataConRep
 instance Binary SDataCon
 instance Binary STyCon
-instance Binary ForeignSrcLang
 instance Binary RealSrcSpan
 instance Binary BufSpan
 instance Binary UnhelpfulSpanReason
